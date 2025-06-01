@@ -2,25 +2,31 @@ import streamlit as st
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import joblib
+import soundfile as sf
+import os
+import tempfile
+from sklearn.preprocessing import StandardScaler
+import librosa
 
-# Model definition
+# Define CNN model
 class VoiceCNN(nn.Module):
     def __init__(self):
-        super().__init__()
-        self.conv1 = nn.Conv1d(1, 32, kernel_size=3)
-        self.pool  = nn.MaxPool1d(2)
-        self.conv2 = nn.Conv1d(32, 64, kernel_size=3)
-        self.fc1   = nn.Linear(64 * 8, 64)
-        self.fc2   = nn.Linear(64, 1)
-        self.drop  = nn.Dropout(0.3)
+        super(VoiceCNN, self).__init__()
+        self.conv1 = nn.Conv1d(1, 16, kernel_size=3, stride=1, padding=1)
+        self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
+        self.conv2 = nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1)
+        self.fc1 = nn.Linear(64 * 4, 64)  # <== MODIFICAT: 64 * 4 = 256 (cum era în modelul salvat)
+        self.fc2 = nn.Linear(64, 2)
 
     def forward(self, x):
-        x = self.pool(torch.relu(self.conv1(x)))
-        x = self.pool(torch.relu(self.conv2(x)))
-        x = x.view(x.size(0), -1)
-        x = self.drop(torch.relu(self.fc1(x)))
-        return torch.sigmoid(self.fc2(x))
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = x.view(x.size(0), -1)  # flatten
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
 
 # Load model and scaler
 model = VoiceCNN()
@@ -28,25 +34,32 @@ model.load_state_dict(torch.load('voice_cnn.pth', map_location='cpu'))
 model.eval()
 scaler = joblib.load('scaler.pkl')
 
-# Feature names
-features = ['MDVP:Fo(Hz)', 'MDVP:Fhi(Hz)', 'MDVP:Flo(Hz)', 'MDVP:Jitter(%)',
-            'MDVP:Jitter(Abs)', 'MDVP:RAP', 'MDVP:PPQ', 'Jitter:DDP',
-            'MDVP:Shimmer', 'MDVP:Shimmer(dB)', 'Shimmer:APQ3',
-            'Shimmer:APQ5', 'MDVP:APQ', 'Shimmer:DDA', 'NHR', 'HNR',
-            'RPDE', 'DFA', 'spread1', 'spread2', 'D2', 'PPE']
+st.title("Parkinson’s Detection from Voice")
+st.write("Upload a .wav file of a sustained vowel sound (e.g., 'ah')")
 
-st.title("🧠 Parkinson's Detection from Voice (PyTorch)")
-st.write("Enter 22 voice features below:")
+uploaded_file = st.file_uploader("Choose a .wav file", type=["wav"])
 
-input_data = [st.number_input(f, format="%.5f") for f in features]
+def extract_features(file_path):
+    y, sr = librosa.load(file_path, sr=16000)
+    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+    mfccs_mean = np.mean(mfccs, axis=1)
+    return mfccs_mean
 
-if st.button("Predict"):
-    X = np.array(input_data).reshape(1, -1)
-    Xs = scaler.transform(X)
-    Xt = torch.tensor(Xs, dtype=torch.float32).unsqueeze(1)
+if uploaded_file is not None:
+    # Save file temporarily
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+        tmp_file.write(uploaded_file.read())
+        tmp_path = tmp_file.name
+
+    # Feature extraction
+    features = extract_features(tmp_path)
+    features = scaler.transform([features])
+    features = torch.tensor(features, dtype=torch.float32).unsqueeze(1)  # add channel dim
+
+    # Prediction
     with torch.no_grad():
-        pred = model(Xt).item()
-    if pred >= 0.5:
-        st.error(f"⚠️ Parkinson Detected (score={pred:.2f})")
-    else:
-        st.success(f"✅ No Parkinson Detected (score={pred:.2f})")
+        outputs = model(features)
+        _, predicted = torch.max(outputs, 1)
+
+    label = "Parkinson's Positive" if predicted.item() == 1 else "Parkinson's Negative"
+    st.write(f"### Prediction: {label}")
