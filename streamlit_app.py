@@ -17,7 +17,7 @@ class VoiceCNN(nn.Module):
         self.conv1 = nn.Conv1d(1, 16, kernel_size=3, stride=1, padding=1)
         self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
         self.conv2 = nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1)
-        self.fc1 = nn.Linear(64 * 4, 64)  # <== MODIFICAT: 64 * 4 = 256 (cum era în modelul salvat)
+        self.fc1 = nn.Linear(32 * 3, 64)  # <== MODIFICAT: 64 * 4 = 256 (cum era în modelul salvat)
         self.fc2 = nn.Linear(64, 2)
 
     def forward(self, x):
