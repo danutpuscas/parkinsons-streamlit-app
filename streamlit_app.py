@@ -45,7 +45,7 @@ def extract_features(file_path):
         y = y[:, 0]  # convert stereo to mono if needed
     y = y.astype(float)
     import librosa
-    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=22)
     mfccs_mean = np.mean(mfccs, axis=1)
     return mfccs_mean
 
