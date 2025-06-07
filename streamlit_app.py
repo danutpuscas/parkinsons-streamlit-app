@@ -40,7 +40,11 @@ st.write("Upload a .wav file of a sustained vowel sound (e.g., 'ah')")
 uploaded_file = st.file_uploader("Choose a .wav file", type=["wav"])
 
 def extract_features(file_path):
-    y, sr = librosa.load(file_path, sr=16000)
+    y, sr = sf.read(file_path)  # înlocuiește librosa.load
+    if y.ndim > 1:
+        y = y[:, 0]  # convert stereo to mono if needed
+    y = y.astype(float)
+    import librosa
     mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
     mfccs_mean = np.mean(mfccs, axis=1)
     return mfccs_mean
