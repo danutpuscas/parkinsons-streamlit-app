@@ -1,69 +1,62 @@
 import streamlit as st
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import joblib
-import soundfile as sf
+import librosa
 import os
 import tempfile
-from sklearn.preprocessing import StandardScaler
-import librosa
+from sklearn.base import BaseEstimator
+from sklearn.preprocessing import MinMaxScaler
 
-# Define CNN model
-class VoiceCNN(nn.Module):
-    def __init__(self):
-        super(VoiceCNN, self).__init__()
-        self.conv1 = nn.Conv1d(1, 32, kernel_size=3, stride=1, padding=1)
-        self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
-        self.conv2 = nn.Conv1d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.fc1 = nn.Linear(64 * 4, 64)  # 64 channels * 4 width
-        self.fc2 = nn.Linear(64, 1)  # binary classification (output = 1 neuron)
+# -------------------------------
+# SECTION 1: Load model and scaler
+# -------------------------------
+@st.cache_resource
+def load_model_and_scaler():
+    model = joblib.load('best_model.pkl')  # e.g. RandomForest, SVM etc.
+    scaler = joblib.load('scaler.pkl')
+    return model, scaler
 
-    def forward(self, x):
-        x = self.pool(torch.relu(self.conv1(x)))
-        x = self.pool(torch.relu(self.conv2(x)))
-        x = x.view(x.size(0), -1)
-        x = torch.relu(self.fc1(x))
-        x = torch.sigmoid(self.fc2(x))
-        return x
+model, scaler = load_model_and_scaler()
 
-# Load model and scaler
-model = VoiceCNN()
-model.load_state_dict(torch.load('voice_cnn.pth', map_location='cpu'))
-model.eval()
-scaler = joblib.load('scaler.pkl')
-
-st.title("Parkinson’s Detection from Voice")
-st.write("Upload a .wav file of a sustained vowel sound (e.g., 'ah')")
-
-uploaded_file = st.file_uploader("Choose a .wav file", type=["wav"])
-
+# -------------------------------
+# SECTION 2: Feature extraction from .wav
+# -------------------------------
 def extract_features(file_path):
-    y, sr = sf.read(file_path)  # înlocuiește librosa.load
-    if y.ndim > 1:
-        y = y[:, 0]  # convert stereo to mono if needed
-    y = y.astype(float)
-    import librosa
-    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=22)
+    y, sr = librosa.load(file_path, sr=16000)
+    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=19)
     mfccs_mean = np.mean(mfccs, axis=1)
-    return mfccs_mean
+    return mfccs_mean.reshape(1, -1)
 
+# -------------------------------
+# SECTION 3: Streamlit UI
+# -------------------------------
+st.set_page_config(page_title="Parkinson’s Detection from Voice", layout="centered")
+st.title("🧠 Parkinson’s Voice Detection")
+st.write("Upload a `.wav` file to check for Parkinson's-related vocal biomarkers.")
+
+uploaded_file = st.file_uploader("Upload a voice recording (.wav)", type=["wav"])
+
+# -------------------------------
+# SECTION 4: Inference
+# -------------------------------
 if uploaded_file is not None:
-    # Save file temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
         tmp_file.write(uploaded_file.read())
-        tmp_path = tmp_file.name
+        file_path = tmp_file.name
 
-    # Feature extraction
-    features = extract_features(tmp_path)
-    features = scaler.transform([features])
-    features = torch.tensor(features, dtype=torch.float32).unsqueeze(1)  # add channel dim
+    try:
+        features = extract_features(file_path)
 
-    # Prediction
-    with torch.no_grad():
-        outputs = model(features)
-        _, predicted = torch.max(outputs, 1)
+        if features.shape[1] != scaler.mean_.shape[0]:
+            st.error(f"Feature mismatch: Model expects {scaler.mean_.shape[0]} features, but got {features.shape[1]}")
+        else:
+            features_scaled = scaler.transform(features)
+            prediction = model.predict(features_scaled)[0]
+            prob = getattr(model, "predict_proba", lambda x: [[0, 1]])(features_scaled)[0][1]
 
-    label = "Parkinson's Positive" if predicted.item() == 1 else "Parkinson's Negative"
-    st.write(f"### Prediction: {label}")
+            st.subheader("Prediction Result:")
+            st.success("✅ Parkinson’s Likely" if prediction == 1 else "🟢 No Parkinson’s Detected")
+            st.metric(label="Confidence", value=f"{prob * 100:.2f}%")
+    except Exception as e:
+        st.error(f"Error during processing: {e}")
