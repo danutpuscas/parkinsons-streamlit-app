@@ -35,8 +35,14 @@ def extract_features(file_path):
     return np.mean(mfccs, axis=1), mfccs, sr, y
 
 if uploaded_file is not None:
+    # Playback audio
+    st.subheader("🔊 Play Audio")
+    uploaded_file.seek(0)  # Rewind the buffer
+    st.audio(uploaded_file.read(), format='audio/wav')
+
+    # Save uploaded file temporarily
     with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
-        tmp.write(uploaded_file.read())
+        tmp.write(uploaded_file.getvalue())
         tmp_path = tmp.name
 
     try:
@@ -96,3 +102,4 @@ if uploaded_file is not None:
 
     except Exception as e:
         st.error(f"Error processing file: {e}")
+
