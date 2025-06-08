@@ -1,9 +1,8 @@
 streamlit
-scikit-learn
-joblib
-librosa
 numpy
-matplotlib
 pandas
-soundfile
+scikit-learn
+matplotlib
+joblib
 plotly
+openpyxl
