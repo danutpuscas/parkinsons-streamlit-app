@@ -1,7 +1,7 @@
 streamlit
-numpy
 scikit-learn
-librosa
-soundfile
 joblib
-torch
+librosa
+numpy
+matplotlib
+soundfile
