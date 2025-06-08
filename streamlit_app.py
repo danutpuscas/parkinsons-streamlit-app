@@ -1,13 +1,7 @@
 import streamlit as st
 st.set_page_config(page_title="Parkinson's Voice Detection", layout="centered")
 
-# Workaround for torch class watcher issue
-import sys
-if "__path__" in sys.modules:
-    del sys.modules["__path__"]
-
 import numpy as np
-import torch
 import joblib
 import librosa
 import os
