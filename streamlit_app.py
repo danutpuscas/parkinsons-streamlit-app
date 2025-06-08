@@ -42,8 +42,8 @@ if uploaded_file is not None:
 
         st.subheader("📈 MFCC Spectrogram")
         fig, ax = plt.subplots()
-        librosa.display.specshow(mfcc_full, x_axis='time', ax=ax, sr=sr)
-        plt.colorbar(format='%+2.0f dB')
+        mfcc_img = librosa.display.specshow(mfcc_full, x_axis='time', ax=ax, sr=sr)
+        fig.colorbar(mfcc_img, ax=ax, format='%+2.0f dB')
         st.pyplot(fig)
 
         results = {}
