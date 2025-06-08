@@ -28,7 +28,7 @@ uploaded_file = st.file_uploader("Upload a WAV file", type=["wav"])
 
 def extract_features(file_path):
     y, sr = librosa.load(file_path, sr=16000)
-    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=19)
+    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
     return np.mean(mfccs, axis=1), mfccs, sr
 
 if uploaded_file is not None:
