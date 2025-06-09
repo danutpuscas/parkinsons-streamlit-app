@@ -1,1 +1,1 @@
-n_mfcc=20
+n_mfcc=24
