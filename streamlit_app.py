@@ -8,8 +8,8 @@ import soundfile as sf
 import tempfile
 
 # Load models
-model = joblib.load("models/best_model.pkl")
-scaler = joblib.load("models/scaler.pkl")
+model = joblib.load("best_model.pkl")
+scaler = joblib.load("scaler.pkl")
 
 st.title("Parkinson's Detection from Voice")
 
