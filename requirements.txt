@@ -1,10 +1,11 @@
 streamlit
 numpy
-pandas
 librosa
 scikit-learn
 matplotlib
+pandas
 joblib
 plotly
-soundfile
+tensorflow
+imbalanced-learn
 streamlit-audiorec
