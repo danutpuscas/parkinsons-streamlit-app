@@ -1,8 +1,10 @@
-streamlit>=1.45
+streamlit
 numpy
+pandas
 librosa
 scikit-learn
 matplotlib
-pandas
 joblib
 plotly
+soundfile
+streamlit-audiorec
