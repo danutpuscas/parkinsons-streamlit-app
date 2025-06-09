@@ -8,14 +8,10 @@ import tempfile
 import pandas as pd
 import plotly.graph_objects as go
 import os
-from streamlit_audiorec import st_audiorec
-import soundfile as sf
-from pydub import AudioSegment
-from io import BytesIO
 
 st.set_page_config(page_title="Parkinson's Detection from Voice", layout="centered")
 st.title("🧠 Parkinson's Detection from Voice")
-st.write("Upload a .wav file or record your voice (sustained vowel like 'ah')")
+st.write("Upload a .wav file or record live from your microphone")
 
 @st.cache_resource
 def load_models():
@@ -28,91 +24,89 @@ def load_models():
 
 models = load_models()
 
-with open("feature_config.txt", "r") as f:
-    n_mfcc = int(f.read().split("=")[1])
+# Read saved MFCC feature count from config
+:contentReference[oaicite:1]{index=1}
+    :contentReference[oaicite:2]{index=2}
 
-upload_method = st.radio("Choose input method:", ("Upload WAV file", "Record from microphone"))
+# Two options: file upload or live record
+:contentReference[oaicite:3]{index=3}
 
 audio_bytes = None
-uploaded_file = None
+:contentReference[oaicite:4]{index=4}
+    :contentReference[oaicite:5]{index=5}
+    if uploaded:
+        :contentReference[oaicite:6]{index=6}
 
-if upload_method == "Upload WAV file":
-    uploaded_file = st.file_uploader("Upload a WAV file", type=["wav"])
-elif upload_method == "Record from microphone":
-    st.info("Click to record your voice (ideal 3–5 seconds)")
-    audio_bytes = st_audiorec()
+:contentReference[oaicite:7]{index=7}
+    :contentReference[oaicite:8]{index=8}
+        :contentReference[oaicite:9]{index=9}
+        if rec:
+            :contentReference[oaicite:10]{index=10}
 
-
-def extract_features(file_path):
-    y, sr = librosa.load(file_path, sr=16000)
-    y, _ = librosa.effects.trim(y)  # Trim silence
-    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
-    return np.mean(mfccs, axis=1), mfccs, sr, y
-
-if uploaded_file or audio_bytes:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        if uploaded_file:
-            tmp.write(uploaded_file.read())
-        else:
-            # Convert bytes to wav
-            audio = AudioSegment.from_file(BytesIO(audio_bytes), format="wav")
-            audio.export(tmp.name, format="wav")
-        tmp_path = tmp.name
-
+if audio_bytes:
+    # Do processing
     try:
-        features_mean, mfcc_full, sr, y = extract_features(tmp_path)
+        :contentReference[oaicite:11]{index=11}
+        :contentReference[oaicite:12]{index=12}
+            :contentReference[oaicite:13]{index=13}
+            :contentReference[oaicite:14]{index=14}
+
+        # Extract features
+        y, sr = librosa.load(tmp_path, sr=16000)
+        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
+        features_mean = np.mean(mfccs, axis=1)
         scaled = models['scaler'].transform([features_mean])
 
-        st.subheader("🎧 File Details")
-        st.markdown(f"**Duration:** `{librosa.get_duration(y=y, sr=sr):.2f} seconds`")
-        st.audio(tmp_path, format="audio/wav")
+        # Show waveform and spectrogram
+        st.subheader("🎧 Audio Visualizations")
+        fig_wf, ax_wf = plt.subplots()
+        librosa.display.waveshow(y, sr=sr, ax=ax_wf)
+        ax_wf.set_title("Waveform")
+        st.pyplot(fig_wf)
 
-        st.subheader("📈 MFCC Spectrogram")
-        fig, ax = plt.subplots()
-        mfcc_img = librosa.display.specshow(mfcc_full, x_axis='time', ax=ax, sr=sr)
-        fig.colorbar(mfcc_img, ax=ax, format='%+2.0f dB')
-        st.pyplot(fig)
+        fig_sp, ax_sp = plt.subplots()
+        img = librosa.display.specshow(mfccs, sr=sr, x_axis='time', ax=ax_sp)
+        fig_sp.colorbar(img, ax=ax_sp)
+        ax_sp.set_title("MFCC Spectrogram")
+        st.pyplot(fig_sp)
 
-        fig2, ax2 = plt.subplots()
-        librosa.display.waveshow(y, sr=sr, ax=ax2)
-        ax2.set_title("Waveform")
-        st.pyplot(fig2)
-
+        # Model predictions
         results = {}
-        for name in ['best', 'svm', 'rf']:
+        for name in ['best','svm','rf']:
             prob = models[name].predict_proba(scaled)[0][1]
             pred = models[name].predict(scaled)[0]
-            results[name] = {'prediction': 'Positive' if pred == 1 else 'Negative', 'confidence': f"{prob*100:.2f}%"}
+            results[name] = {
+                'prediction': 'Positive' if pred==1 else 'Negative',
+                'confidence': f"{prob*100:.1f}%"
+            }
 
         st.subheader("🧪 Results")
-        df_results = pd.DataFrame(results).T
-        st.dataframe(df_results)
+        df = pd.DataFrame(results).T
+        st.dataframe(df)
 
-        # Radar chart
-        fig_radar = go.Figure()
-        for model in df_results.index:
-            conf = float(df_results.loc[model]['confidence'].replace('%',''))
-            fig_radar.add_trace(go.Scatterpolar(r=[conf], theta=[model], fill='toself', name=model))
-        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=True, title="Confidence Radar Chart")
-        st.plotly_chart(fig_radar)
+        # Confidence Radar
+        fig_r = go.Figure()
+        for idx,row in df.iterrows():
+            fig_r.add_trace(go.Scatterpolar(r=[float(row.confidence[:-1])], theta=[idx], fill="toself", name=idx))
+        fig_r.update_layout(polar=dict(radialaxis=dict(range=[0,100])), showlegend=True)
+        st.plotly_chart(fig_r)
 
-        # Ensemble decision
+        # Ensemble majority vote
         from collections import Counter
-        final_pred = Counter([v['prediction'] for v in results.values()]).most_common(1)[0][0]
-        st.success(f"🎯 Final Ensemble Prediction: **{final_pred}**")
+        final = Counter(df['prediction']).most_common(1)[0][0]
+        st.success(f"🎯 Ensemble says: **{final}**")
 
-        csv = df_results.to_csv(index=True).encode('utf-8')
-        st.download_button("📥 Download Results", csv, "results.csv", "text/csv")
+        # Download results
+        tocsv = df.to_csv().encode('utf-8')
+        st.download_button("Download Results CSV", tocsv, "results.csv")
 
-        # Append to log
-        log_row = {"file": uploaded_file.name if uploaded_file else "mic_recording", **{f"{k}_prediction": v['prediction'] for k,v in results.items()}, **{f"{k}_conf": v['confidence'] for k,v in results.items()}}
-        log_path = "predictions_log.csv"
-        if os.path.exists(log_path):
-            log_df = pd.read_csv(log_path)
-            log_df = pd.concat([log_df, pd.DataFrame([log_row])], ignore_index=True)
-        else:
-            log_df = pd.DataFrame([log_row])
-        log_df.to_csv(log_path, index=False)
+        # Save logfile
+        row = {"file_mode": mode, **{f"{k}_pred":v['prediction'] for k,v in results.items()},
+               **{f"{k}_conf":v['confidence'] for k,v in results.items()}}
+        logf = "predictions_log.csv"
+        logdf = pd.read_csv(logf) if os.path.exists(logf) else pd.DataFrame()
+        logdf = pd.concat([logdf, pd.DataFrame([row])], ignore_index=True)
+        logdf.to_csv(logf,index=False)
 
     except Exception as e:
-        st.error(f"Error processing file: {e}")
+        st.error(f"Error: {e}")
