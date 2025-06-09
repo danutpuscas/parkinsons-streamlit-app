@@ -6,4 +6,6 @@ matplotlib
 pandas
 joblib
 plotly
+pydub
+soundfile
 streamlit-audiorec
