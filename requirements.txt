@@ -1,8 +1,9 @@
 streamlit
 numpy
-pandas
+librosa
 scikit-learn
 matplotlib
+pandas
 joblib
 plotly
-openpyxl
+tensorflow
