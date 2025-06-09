@@ -1,7 +1,7 @@
 streamlit>=1.45
 numpy
 librosa
-scikit‑learn
+scikit-learn
 matplotlib
 pandas
 joblib
