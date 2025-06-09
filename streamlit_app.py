@@ -1,95 +1,61 @@
 import streamlit as st
 import numpy as np
 import librosa
-import librosa.display
 import joblib
-import matplotlib.pyplot as plt
-import tempfile
-import pandas as pd
-import plotly.graph_objects as go
 import os
+from streamlit_audiorec import st_audiorec
+import soundfile as sf
+import tempfile
 
-st.set_page_config(page_title="Parkinson's Detection from Voice", layout="centered")
-st.title("🧠 Parkinson's Detection from Voice")
-st.write("Upload or record a .wav file of a sustained vowel sound (e.g., 'ah')")
+# Load models
+model = joblib.load("models/best_model.pkl")
+scaler = joblib.load("models/scaler.pkl")
 
-@st.cache_resource
-def load_models():
-    return {
-        'best': joblib.load('best_model.pkl'),
-        'svm': joblib.load('model_svm.pkl'),
-        'rf': joblib.load('model_rf.pkl'),
-        'scaler': joblib.load('scaler.pkl')
-    }
+st.title("Parkinson's Detection from Voice")
 
-models = load_models()
+option = st.radio("Select input method:", ("Upload .wav file", "Record from microphone"))
 
-with open("feature_config.txt", "r") as f:
-    n_mfcc = int(f.read().split("=")[1])
+uploaded_audio = None
+if option == "Upload .wav file":
+    uploaded_audio = st.file_uploader("Upload a .wav file", type=["wav"])
 
-def extract_features(file_path):
-    y, sr = librosa.load(file_path, sr=16000)
-    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
-    features = np.mean(mfccs, axis=1)
-    return features, mfccs, sr, y
+elif option == "Record from microphone":
+    audio_bytes = st_audiorec()
+    if audio_bytes:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+            temp_audio.write(audio_bytes)
+            uploaded_audio = temp_audio.name
 
-record_mode = st.toggle("🎙️ Record from Microphone")
-if record_mode:
-    st.info("Please install streamlit-audiorec manually if not yet available.")
+if uploaded_audio:
     try:
-        from streamlit_audiorec import st_audiorec
-        wav_audio_data = st_audiorec()
-        if wav_audio_data:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as f:
-                f.write(wav_audio_data)
-                tmp_path = f.name
-    except:
-        st.warning("streamlit-audiorec not installed or not working. Please upload instead.")
-        tmp_path = None
-else:
-    uploaded_file = st.file_uploader("Upload a WAV file", type=["wav"])
-    if uploaded_file is not None:
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as f:
-            f.write(uploaded_file.read())
-            tmp_path = f.name
-    else:
-        tmp_path = None
+        y, sr = librosa.load(uploaded_audio, sr=22050)
 
-if tmp_path:
-    try:
-        features, mfcc_full, sr, y = extract_features(tmp_path)
-        scaled = models['scaler'].transform([features])
+        # Extract features (20 features total to match training data)
+        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        zcr = librosa.feature.zero_crossing_rate(y)
+        centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
+        bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)
+        contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
 
-        st.subheader("🎧 Audio Preview")
-        st.audio(tmp_path)
-        st.markdown(f"**Duration:** `{librosa.get_duration(y=y, sr=sr):.2f} seconds`")
+        features = [
+            np.mean(mfccs[:7]),  # first 7 MFCCs
+            np.std(mfccs[:7]),
+            np.mean(zcr),
+            np.mean(centroid),
+            np.mean(bandwidth),
+            np.mean(contrast),
+            np.std(centroid),
+            np.std(bandwidth),
+            np.std(contrast)
+        ]
 
-        st.subheader("📈 MFCC Spectrogram")
-        fig, ax = plt.subplots()
-        img = librosa.display.specshow(mfcc_full, x_axis='time', sr=sr, ax=ax)
-        fig.colorbar(img, ax=ax)
-        st.pyplot(fig)
+        features = np.array(features).reshape(1, -1)
+        features_scaled = scaler.transform(features)
+        pred = model.predict(features_scaled)[0]
 
-        results = {}
-        for name in ['best', 'svm', 'rf']:
-            prob = models[name].predict_proba(scaled)[0][1]
-            pred = models[name].predict(scaled)[0]
-            results[name] = {'prediction': 'Positive' if pred == 1 else 'Negative', 'confidence': f"{prob*100:.2f}%"}
-
-        st.subheader("🧪 Results")
-        df_results = pd.DataFrame(results).T
-        st.dataframe(df_results)
-
-        fig_radar = go.Figure()
-        for model in df_results.index:
-            conf = float(df_results.loc[model]['confidence'].replace('%',''))
-            fig_radar.add_trace(go.Scatterpolar(r=[conf], theta=[model], fill='toself', name=model))
-        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=True)
-        st.plotly_chart(fig_radar)
-
-        from collections import Counter
-        final_pred = Counter([v['prediction'] for v in results.values()]).most_common(1)[0][0]
-        st.success(f"🎯 Final Ensemble Prediction: **{final_pred}**")
+        st.success("Prediction: PwPD" if pred == 1 else "Prediction: Healthy Control")
 
     except Exception as e:
         st.error(f"Error processing file: {e}")
+else:
+    st.info("Upload or record a .wav file to start.")
