@@ -1,61 +1,72 @@
 import streamlit as st
-import numpy as np
 import librosa
-import joblib
-import os
-from streamlit_audiorec import st_audiorec
+import librosa.display
+import numpy as np
+import matplotlib.pyplot as plt
 import soundfile as sf
-import tempfile
+import joblib
+from io import BytesIO
+from sklearn.preprocessing import MinMaxScaler
 
-# Load models
-model = joblib.load("best_model.pkl")
-scaler = joblib.load("scaler.pkl")
+# Title
+st.title("Parkinson's Disease Detection from Voice")
 
-st.title("Parkinson's Detection from Voice")
+# Load models and scaler
+@st.cache_resource
+def load_model_and_scaler():
+    model = joblib.load('best_model.pkl')
+    scaler = joblib.load('scaler.pkl')
+    return model, scaler
 
-option = st.radio("Select input method:", ("Upload .wav file", "Record from microphone"))
+model, scaler = load_model_and_scaler()
 
-uploaded_audio = None
-if option == "Upload .wav file":
-    uploaded_audio = st.file_uploader("Upload a .wav file", type=["wav"])
+# Upload audio
+uploaded_file = st.file_uploader("Upload a WAV file", type=["wav"])
 
-elif option == "Record from microphone":
-    audio_bytes = st_audiorec()
-    if audio_bytes:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-            temp_audio.write(audio_bytes)
-            uploaded_audio = temp_audio.name
+if uploaded_file is not None:
+    # Load and display audio
+    audio, sr = librosa.load(uploaded_file, sr=None)
+    st.audio(uploaded_file, format='audio/wav')
 
-if uploaded_audio:
+    # Plot waveform
+    st.subheader("Waveform")
+    fig_wave, ax = plt.subplots()
+    librosa.display.waveshow(audio, sr=sr, ax=ax)
+    ax.set_title('Audio Waveform')
+    st.pyplot(fig_wave)
+
+    # Plot spectrogram
+    st.subheader("Spectrogram")
+    stft = librosa.stft(audio)
+    db_stft = librosa.amplitude_to_db(np.abs(stft))
+    fig_spec, ax = plt.subplots()
+    img = librosa.display.specshow(db_stft, sr=sr, x_axis='time', y_axis='log', ax=ax)
+    fig_spec.colorbar(img, ax=ax, format="%+2.0f dB")
+    ax.set_title('Spectrogram')
+    st.pyplot(fig_spec)
+
+    # Extract features
+    st.subheader("Model Prediction")
+    def extract_features(audio, sr):
+        features = []
+        features.append(np.mean(librosa.feature.zero_crossing_rate(y=audio)))
+        features.append(np.mean(librosa.feature.rms(y=audio)))
+        features.append(np.mean(librosa.feature.spectral_centroid(y=audio, sr=sr)))
+        features.append(np.mean(librosa.feature.spectral_bandwidth(y=audio, sr=sr)))
+        mfccs = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=20)
+        features.extend(np.mean(mfccs, axis=1))
+        return np.array(features).reshape(1, -1)
+
     try:
-        y, sr = librosa.load(uploaded_audio, sr=22050)
-
-        # Extract features (20 features total to match training data)
-        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-        zcr = librosa.feature.zero_crossing_rate(y)
-        centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
-        bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)
-        contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
-
-        features = [
-            np.mean(mfccs[:7]),  # first 7 MFCCs
-            np.std(mfccs[:7]),
-            np.mean(zcr),
-            np.mean(centroid),
-            np.mean(bandwidth),
-            np.mean(contrast),
-            np.std(centroid),
-            np.std(bandwidth),
-            np.std(contrast)
-        ]
-
-        features = np.array(features).reshape(1, -1)
+        features = extract_features(audio, sr)
         features_scaled = scaler.transform(features)
-        pred = model.predict(features_scaled)[0]
+        prediction = model.predict(features_scaled)[0]
+        proba = model.predict_proba(features_scaled)[0][1] if hasattr(model, 'predict_proba') else None
 
-        st.success("Prediction: PwPD" if pred == 1 else "Prediction: Healthy Control")
-
+        st.write(f"**Prediction:** {'Parkinson's Detected' if prediction else 'No Parkinson's'}")
+        if proba is not None:
+            st.write(f"**Confidence:** {proba * 100:.2f}%")
     except Exception as e:
-        st.error(f"Error processing file: {e}")
+        st.error(f"An error occurred while processing the audio: {str(e)}")
 else:
-    st.info("Upload or record a .wav file to start.")
+    st.info("Please upload a WAV file to get a prediction.")
