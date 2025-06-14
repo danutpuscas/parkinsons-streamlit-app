@@ -13,7 +13,7 @@ st.write("Upload a `.wav` file and let the model predict whether the voice indic
 # Load trained model
 @st.cache_resource
 def load_model():
-    model = joblib.load("model.pkl")  # Ensure this file exists in the app directory
+    model = joblib.load("best_model.pkl")  # Ensure this file exists in the app directory
     return model
 
 model = load_model()
