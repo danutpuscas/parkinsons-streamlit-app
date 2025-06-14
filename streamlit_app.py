@@ -3,69 +3,79 @@ import numpy as np
 import joblib
 import pandas as pd
 import plotly.graph_objects as go
-from collections import Counter
+import librosa
+import librosa.display
+import matplotlib.pyplot as plt
+import os
+import tempfile
 
 st.set_page_config(page_title="Parkinson's Detection from MFCC", layout="centered")
 st.title("🧠 Parkinson's Detection from MFCC Features")
 st.write("Upload a .wav file or a .csv/.xlsx file with MFCCs to predict Parkinson's.")
 
 @st.cache_resource
-def load_resources():
-    best_model = joblib.load('best_model.pkl')
-    scaler = joblib.load('scaler.pkl')
-    return best_model, scaler
+def load_models():
+    return {
+        'best': joblib.load('best_model.pkl'),
+        'scaler': joblib.load('scaler.pkl')
+    }
 
-model, scaler = load_resources()
-num_features = scaler.n_features_in_  # Automatically infer feature count
+models = load_models()
 
-file = st.file_uploader("Upload MFCC file (.csv, .xlsx)", type=["csv", "xlsx"])
+# Define expected number of MFCC features (you can change this if needed)
+NUM_FEATURES = 20
+
+file = st.file_uploader("Upload MFCC file or Audio (.csv, .xlsx, .wav)", type=["csv", "xlsx", "wav"])
 
 if file is not None:
     try:
         if file.name.endswith(".csv"):
             df = pd.read_csv(file)
+            mfcc_data = df.iloc[:, :NUM_FEATURES].values
+
         elif file.name.endswith(".xlsx"):
             df = pd.read_excel(file)
+            mfcc_data = df.iloc[:, :NUM_FEATURES].values
+
+        elif file.name.endswith(".wav"):
+            # Save temporarily to disk
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+                tmp_file.write(file.read())
+                audio_path = tmp_file.name
+
+            st.audio(audio_path, format='audio/wav')
+
+            # Load and extract MFCCs
+            y, sr = librosa.load(audio_path, sr=None)
+            mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=NUM_FEATURES)
+            mfcc_data = mfccs.T
+
+            # Display MFCC spectrogram
+            fig, ax = plt.subplots()
+            img = librosa.display.specshow(mfccs, x_axis='time', ax=ax)
+            ax.set(title='MFCC')
+            fig.colorbar(img, ax=ax)
+            st.pyplot(fig)
+
         else:
             raise ValueError("Unsupported file format")
 
-        mfcc_data = df.iloc[:, :num_features].values
-        scaled = scaler.transform(mfcc_data)
-
-        # Model prediction
-        probs = model.predict_proba(scaled)[:, 1]
-        preds = model.predict(scaled)
+        scaled = models['scaler'].transform(mfcc_data)
+        probs = models['best'].predict_proba(scaled)[:, 1]
+        preds = models['best'].predict(scaled)
         majority_vote = int(np.round(np.mean(preds)))
         avg_conf = np.mean(probs)
 
-        result = {
-            'prediction': 'Positive' if majority_vote == 1 else 'Negative',
-            'confidence': f"{avg_conf * 100:.2f}%"
-        }
+        st.subheader("🧪 Result")
+        result_text = "Positive" if majority_vote == 1 else "Negative"
+        st.write(f"**Prediction**: {result_text}")
+        st.write(f"**Confidence**: {avg_conf*100:.2f}%")
 
-        st.subheader("🧪 Results")
-        df_results = pd.DataFrame([result], index=["Best Model"])
-        st.dataframe(df_results)
-
-        # Radar chart
+        # Radar plot
         fig_radar = go.Figure()
-        fig_radar.add_trace(go.Scatterpolar(
-            r=[avg_conf * 100],
-            theta=["Best Model"],
-            fill='toself',
-            name="Best Model"
-        ))
-        fig_radar.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-            showlegend=True,
-            title="Confidence Radar Chart"
-        )
+        fig_radar.add_trace(go.Scatterpolar(r=[avg_conf * 100], theta=['Confidence'], fill='toself', name='Best Model'))
+        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=True, title="Confidence Radar Chart")
         st.plotly_chart(fig_radar)
-
-        st.success(f"🎯 Final Prediction: **{result['prediction']}**")
-
-        csv = df_results.to_csv(index=True).encode('utf-8')
-        st.download_button("📥 Download Results", csv, "results.csv", "text/csv")
 
     except Exception as e:
         st.error(f"Error processing file: {e}")
