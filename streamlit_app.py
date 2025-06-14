@@ -1,64 +1,78 @@
 import streamlit as st
 import numpy as np
 import librosa
-import joblib
+import librosa.display
+import matplotlib.pyplot as plt
 import soundfile as sf
-import os
-import tempfile
+import joblib
+import io
+from sklearn.preprocessing import MinMaxScaler
+import plotly.graph_objects as go
 
-# Title
-st.title("🎤 Parkinson's Detection from Voice")
-st.write("Upload a `.wav` file and let the model predict whether the voice indicates Parkinson’s.")
+st.set_page_config(page_title="Parkinson's Detection", layout="centered")
 
-# Load trained model
-@st.cache_resource
-def load_model():
-    model = joblib.load("best_model.pkl")  # Ensure this file exists in the app directory
-    return model
+st.title("🎵 Parkinson's Disease Detection from Voice")
+st.write("Upload a `.wav` audio file to determine if the speaker may have Parkinson’s Disease (PD) based on voice features.")
 
-model = load_model()
+# Load model and scaler
+model = joblib.load("best_model.pkl")
+scaler = joblib.load("scaler.pkl")
 
-# Feature extractor
-def extract_features(file_path):
-    y, sr = librosa.load(file_path, sr=None)
-    features = []
-
-    # 1. MFCCs
-    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-    mfccs_mean = np.mean(mfccs.T, axis=0)
-
-    # 2. Chroma
-    stft = np.abs(librosa.stft(y))
-    chroma = librosa.feature.chroma_stft(S=stft, sr=sr)
-    chroma_mean = np.mean(chroma.T, axis=0)
-
-    # 3. Mel Spectrogram
-    mel = librosa.feature.melspectrogram(y=y, sr=sr)
-    mel_mean = np.mean(mel.T, axis=0)
-
-    # Combine features
-    features = np.hstack([mfccs_mean, chroma_mean, mel_mean])
-    return features.reshape(1, -1)
-
-# Upload audio file
+# Audio upload
 uploaded_file = st.file_uploader("Upload a WAV file", type=["wav"])
 
 if uploaded_file is not None:
-    st.audio(uploaded_file, format='audio/wav')
+    # Load audio
+    y, sr = librosa.load(uploaded_file, sr=None)
+    st.audio(uploaded_file, format="audio/wav")
 
-    # Save temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-        tmp_file.write(uploaded_file.read())
-        tmp_path = tmp_file.name
+    # Display waveform
+    st.subheader("Waveform")
+    fig_wave, ax_wave = plt.subplots()
+    librosa.display.waveshow(y, sr=sr, ax=ax_wave)
+    ax_wave.set_title("Audio Waveform")
+    st.pyplot(fig_wave)
 
-    # Extract features
-    try:
-        features = extract_features(tmp_path)
-        prediction = model.predict(features)[0]
+    # Display spectrogram
+    st.subheader("Spectrogram")
+    stft = librosa.stft(y)
+    db_stft = librosa.amplitude_to_db(np.abs(stft), ref=np.max)
+    fig_spec, ax_spec = plt.subplots()
+    img = librosa.display.specshow(db_stft, sr=sr, x_axis='time', y_axis='log', ax=ax_spec)
+    ax_spec.set_title("Log-Frequency Spectrogram")
+    fig_spec.colorbar(img, ax=ax_spec, format="%+2.0f dB")
+    st.pyplot(fig_spec)
 
-        st.success(f"🧠 Prediction: {'Parkinson\'s Detected' if prediction == 1 else 'Healthy'}")
-    except Exception as e:
-        st.error(f"Error processing audio: {e}")
+    # Feature extraction
+    def extract_features(y, sr):
+        features = []
 
-    # Cleanup
-    os.remove(tmp_path)
+        # Basic statistical features
+        features.append(np.mean(librosa.feature.zero_crossing_rate(y)))
+        features.append(np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)))
+        features.append(np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr)))
+        features.append(np.mean(librosa.feature.spectral_bandwidth(y=y, sr=sr)))
+
+        # MFCCs (take first 13)
+        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        mfccs_mean = np.mean(mfccs, axis=1)
+        features.extend(mfccs_mean)
+
+        return np.array(features).reshape(1, -1)
+
+    # Extract & scale features
+    extracted = extract_features(y, sr)
+    extracted_scaled = scaler.transform(extracted)
+
+    # Prediction
+    prediction = model.predict(extracted_scaled)[0]
+    proba = model.predict_proba(extracted_scaled)[0][1] if hasattr(model, "predict_proba") else None
+
+    st.subheader("Prediction")
+    if prediction == 1:
+        st.error("🧠 The model predicts: **Parkinson's Disease (PD)**")
+    else:
+        st.success("✅ The model predicts: **No Parkinson's Disease (Non-PD)**")
+
+    if proba is not None:
+        st.metric(label="PD Probability", value=f"{proba*100:.2f}%")
