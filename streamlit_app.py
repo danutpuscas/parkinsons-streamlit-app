@@ -1,78 +1,71 @@
 import streamlit as st
 import numpy as np
-import librosa
-import librosa.display
-import matplotlib.pyplot as plt
-import soundfile as sf
 import joblib
-import io
-from sklearn.preprocessing import MinMaxScaler
+import pandas as pd
 import plotly.graph_objects as go
+import os
 
-st.set_page_config(page_title="Parkinson's Detection", layout="centered")
+st.set_page_config(page_title="Parkinson's Detection from MFCC", layout="centered")
+st.title("🧠 Parkinson's Detection from MFCC Features")
+st.write("Upload a .wav file or a .csv/.xlsx file with MFCCs to predict Parkinson's.")
 
-st.title("🎵 Parkinson's Disease Detection from Voice")
-st.write("Upload a `.wav` audio file to determine if the speaker may have Parkinson’s Disease (PD) based on voice features.")
+@st.cache_resource
+def load_models():
+    return {
+        'best': joblib.load('best_model.pkl'),
+        'svm': joblib.load('model_svm.pkl'),
+        'rf': joblib.load('model_rf.pkl'),
+        'scaler': joblib.load('scaler.pkl')
+    }
 
-# Load model and scaler
-model = joblib.load("best_model.pkl")
-scaler = joblib.load("scaler.pkl")
+models = load_models()
 
-# Audio upload
-uploaded_file = st.file_uploader("Upload a WAV file", type=["wav"])
+with open("feature_config.txt", "r") as f:
+    num_features = int(f.read())
 
-if uploaded_file is not None:
-    # Load audio
-    y, sr = librosa.load(uploaded_file, sr=None)
-    st.audio(uploaded_file, format="audio/wav")
+file = st.file_uploader("Upload MFCC file (.csv, .xlsx)", type=["csv", "xlsx"])
 
-    # Display waveform
-    st.subheader("Waveform")
-    fig_wave, ax_wave = plt.subplots()
-    librosa.display.waveshow(y, sr=sr, ax=ax_wave)
-    ax_wave.set_title("Audio Waveform")
-    st.pyplot(fig_wave)
+if file is not None:
+    try:
+        if file.name.endswith(".csv"):
+            df = pd.read_csv(file)
+        elif file.name.endswith(".xlsx"):
+            df = pd.read_excel(file)
+        else:
+            raise ValueError("Unsupported file format")
 
-    # Display spectrogram
-    st.subheader("Spectrogram")
-    stft = librosa.stft(y)
-    db_stft = librosa.amplitude_to_db(np.abs(stft), ref=np.max)
-    fig_spec, ax_spec = plt.subplots()
-    img = librosa.display.specshow(db_stft, sr=sr, x_axis='time', y_axis='log', ax=ax_spec)
-    ax_spec.set_title("Log-Frequency Spectrogram")
-    fig_spec.colorbar(img, ax=ax_spec, format="%+2.0f dB")
-    st.pyplot(fig_spec)
+        mfcc_data = df.iloc[:, :num_features].values
+        scaled = models['scaler'].transform(mfcc_data)
 
-    # Feature extraction
-    def extract_features(y, sr):
-        features = []
+        results = {}
+        for name in ['best', 'svm', 'rf']:
+            probs = models[name].predict_proba(scaled)[:, 1]
+            preds = models[name].predict(scaled)
+            majority_vote = int(np.round(np.mean(preds)))
+            avg_conf = np.mean(probs)
 
-        # Basic statistical features
-        features.append(np.mean(librosa.feature.zero_crossing_rate(y)))
-        features.append(np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)))
-        features.append(np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr)))
-        features.append(np.mean(librosa.feature.spectral_bandwidth(y=y, sr=sr)))
+            results[name] = {
+                'prediction': 'Positive' if majority_vote == 1 else 'Negative',
+                'confidence': f"{avg_conf*100:.2f}%"
+            }
 
-        # MFCCs (take first 13)
-        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-        mfccs_mean = np.mean(mfccs, axis=1)
-        features.extend(mfccs_mean)
+        st.subheader("🧪 Results")
+        df_results = pd.DataFrame(results).T
+        st.dataframe(df_results)
 
-        return np.array(features).reshape(1, -1)
+        fig_radar = go.Figure()
+        for model in df_results.index:
+            conf = float(df_results.loc[model]['confidence'].replace('%',''))
+            fig_radar.add_trace(go.Scatterpolar(r=[conf], theta=[model], fill='toself', name=model))
+        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=True, title="Confidence Radar Chart")
+        st.plotly_chart(fig_radar)
 
-    # Extract & scale features
-    extracted = extract_features(y, sr)
-    extracted_scaled = scaler.transform(extracted)
+        from collections import Counter
+        final_pred = Counter([v['prediction'] for v in results.values()]).most_common(1)[0][0]
+        st.success(f"🎯 Final Ensemble Prediction: **{final_pred}**")
 
-    # Prediction
-    prediction = model.predict(extracted_scaled)[0]
-    proba = model.predict_proba(extracted_scaled)[0][1] if hasattr(model, "predict_proba") else None
+        csv = df_results.to_csv(index=True).encode('utf-8')
+        st.download_button("📅 Download Results", csv, "results.csv", "text/csv")
 
-    st.subheader("Prediction")
-    if prediction == 1:
-        st.error("🧠 The model predicts: **Parkinson's Disease (PD)**")
-    else:
-        st.success("✅ The model predicts: **No Parkinson's Disease (Non-PD)**")
-
-    if proba is not None:
-        st.metric(label="PD Probability", value=f"{proba*100:.2f}%")
+    except Exception as e:
+        st.error(f"Error processing file: {e}")
