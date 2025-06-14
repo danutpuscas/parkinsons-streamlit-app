@@ -3,25 +3,20 @@ import numpy as np
 import joblib
 import pandas as pd
 import plotly.graph_objects as go
-import os
+from collections import Counter
 
 st.set_page_config(page_title="Parkinson's Detection from MFCC", layout="centered")
 st.title("🧠 Parkinson's Detection from MFCC Features")
 st.write("Upload a .wav file or a .csv/.xlsx file with MFCCs to predict Parkinson's.")
 
 @st.cache_resource
-def load_models():
-    return {
-        'best': joblib.load('best_model.pkl'),
-        'svm': joblib.load('model_svm.pkl'),
-        'rf': joblib.load('model_rf.pkl'),
-        'scaler': joblib.load('scaler.pkl')
-    }
+def load_resources():
+    best_model = joblib.load('best_model.pkl')
+    scaler = joblib.load('scaler.pkl')
+    return best_model, scaler
 
-models = load_models()
-
-with open("feature_config.txt", "r") as f:
-    num_features = int(f.read())
+model, scaler = load_resources()
+num_features = scaler.n_features_in_  # Automatically infer feature count
 
 file = st.file_uploader("Upload MFCC file (.csv, .xlsx)", type=["csv", "xlsx"])
 
@@ -35,37 +30,42 @@ if file is not None:
             raise ValueError("Unsupported file format")
 
         mfcc_data = df.iloc[:, :num_features].values
-        scaled = models['scaler'].transform(mfcc_data)
+        scaled = scaler.transform(mfcc_data)
 
-        results = {}
-        for name in ['best', 'svm', 'rf']:
-            probs = models[name].predict_proba(scaled)[:, 1]
-            preds = models[name].predict(scaled)
-            majority_vote = int(np.round(np.mean(preds)))
-            avg_conf = np.mean(probs)
+        # Model prediction
+        probs = model.predict_proba(scaled)[:, 1]
+        preds = model.predict(scaled)
+        majority_vote = int(np.round(np.mean(preds)))
+        avg_conf = np.mean(probs)
 
-            results[name] = {
-                'prediction': 'Positive' if majority_vote == 1 else 'Negative',
-                'confidence': f"{avg_conf*100:.2f}%"
-            }
+        result = {
+            'prediction': 'Positive' if majority_vote == 1 else 'Negative',
+            'confidence': f"{avg_conf * 100:.2f}%"
+        }
 
         st.subheader("🧪 Results")
-        df_results = pd.DataFrame(results).T
+        df_results = pd.DataFrame([result], index=["Best Model"])
         st.dataframe(df_results)
 
+        # Radar chart
         fig_radar = go.Figure()
-        for model in df_results.index:
-            conf = float(df_results.loc[model]['confidence'].replace('%',''))
-            fig_radar.add_trace(go.Scatterpolar(r=[conf], theta=[model], fill='toself', name=model))
-        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=True, title="Confidence Radar Chart")
+        fig_radar.add_trace(go.Scatterpolar(
+            r=[avg_conf * 100],
+            theta=["Best Model"],
+            fill='toself',
+            name="Best Model"
+        ))
+        fig_radar.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+            showlegend=True,
+            title="Confidence Radar Chart"
+        )
         st.plotly_chart(fig_radar)
 
-        from collections import Counter
-        final_pred = Counter([v['prediction'] for v in results.values()]).most_common(1)[0][0]
-        st.success(f"🎯 Final Ensemble Prediction: **{final_pred}**")
+        st.success(f"🎯 Final Prediction: **{result['prediction']}**")
 
         csv = df_results.to_csv(index=True).encode('utf-8')
-        st.download_button("📅 Download Results", csv, "results.csv", "text/csv")
+        st.download_button("📥 Download Results", csv, "results.csv", "text/csv")
 
     except Exception as e:
         st.error(f"Error processing file: {e}")
