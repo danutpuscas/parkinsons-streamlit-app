@@ -14,7 +14,6 @@ st.set_page_config(page_title="Parkinson's Detection", layout="centered")
 st.title("🧠 Parkinson's Detection (Voice Biomarkers)")
 st.write("Upload a `.wav` file. The app extracts biomedical voice features (jitter, shimmer, HNR, etc.) and predicts Parkinson's disease using a pre-trained model.")
 
-# Load model and scaler
 @st.cache_resource
 def load_models():
     return {
@@ -25,7 +24,6 @@ def load_models():
 models = load_models()
 expected_feature_count = models['scaler'].n_features_in_
 
-# Feature list from model training
 expected_features = [
     'Jitter (%)',
     'Jitter (Abs)',
@@ -37,7 +35,6 @@ expected_features = [
     'HNR'
 ]
 
-# Feature extraction
 def extract_biomedical_features(audio_path):
     snd = parselmouth.Sound(audio_path)
     point_process = call(snd, "To PointProcess (periodic, cc)", 75, 500)
@@ -60,19 +57,16 @@ def extract_biomedical_features(audio_path):
 
     return features
 
-# Upload interface
 file = st.file_uploader("Upload a `.wav` file", type=["wav"])
 
 if file is not None:
     try:
-        # Save temp .wav
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
             tmp.write(file.read())
             audio_path = tmp.name
 
         st.audio(audio_path, format='audio/wav')
 
-        # Optional: Visualize MFCCs
         y, sr = librosa.load(audio_path, sr=None)
         mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
         fig, ax = plt.subplots()
@@ -81,48 +75,48 @@ if file is not None:
         fig.colorbar(ax.images[0], ax=ax)
         st.pyplot(fig)
 
-        # Extract features
         features = extract_biomedical_features(audio_path)
         df = pd.DataFrame([features])
         st.subheader("📊 Extracted Features")
         st.write(df)
 
-        # Check dimensions
         if df.shape[1] != expected_feature_count:
             raise ValueError(f"Expected {expected_feature_count} features, got {df.shape[1]}.")
         if df.isnull().values.any():
             raise ValueError("Missing values in extracted features.")
 
-        # Scale
         input_data = df.values
         scaled = models['scaler'].transform(input_data)
 
         if scaled.shape[0] == 0:
             raise ValueError("Empty input after scaling.")
 
-        # Predict (with fallback)
         try:
             preds = models['best'].predict(scaled)
         except Exception as e:
             raise RuntimeError(f"Prediction failed: {e}")
 
         try:
-            probs = models['best'].predict_proba(scaled)[:, 1]
-            avg_conf = float(np.mean(probs))
-        except AttributeError:
-            avg_conf = 1.0  # fallback when model doesn't support predict_proba
+            probas = models['best'].predict_proba(scaled)
+            if probas.shape[1] == 2:
+                probs = probas[:, 1]
+                avg_conf = float(np.mean(probs))
+            else:
+                st.warning("⚠️ Model only predicts one class. Confidence is not meaningful.")
+                avg_conf = 1.0
+        except Exception as e:
+            st.warning(f"⚠️ Confidence unavailable: {e}")
+            avg_conf = 1.0
 
         result = int(np.round(np.mean(preds)))
 
-        # Display
         st.subheader("🧪 Prediction Result")
         st.write(f"**Prediction**: {'🟥 Positive' if result == 1 else '🟩 Negative'}")
         if avg_conf <= 1.0:
             st.write(f"**Confidence**: {avg_conf * 100:.2f}%")
         else:
-            st.write("**Confidence**: N/A (model does not support probabilities)")
+            st.write("**Confidence**: N/A (only one class or unsupported)")
 
-        # Radar plot
         if avg_conf <= 1.0:
             fig_radar = go.Figure()
             fig_radar.add_trace(go.Scatterpolar(
