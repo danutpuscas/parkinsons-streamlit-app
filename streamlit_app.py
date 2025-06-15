@@ -3,78 +3,41 @@ import pandas as pd
 import numpy as np
 import joblib
 import plotly.graph_objects as go
-import os
 
-st.set_page_config(page_title="🧠 Parkinson's Voice Detection", layout="centered")
-
-st.title("🧬 Parkinson's Prediction from Voice Biomarkers")
-st.markdown("Upload the extracted `audio_features.csv` and optional `voice_diagnostic.txt`.")
+st.set_page_config(page_title="Parkinson's Detector (CSV)", layout="centered")
+st.title("🧠 Parkinson's Detection from Extracted Audio Features")
+st.write("Upload a `.csv` file generated from Colab (20 features). The app will scale it and use a trained model to predict Parkinson's disease.")
 
 # Load model, scaler, threshold
 @st.cache_resource
-def load_assets():
+def load_artifacts():
+    model = joblib.load("best_model.pkl")
+    scaler = joblib.load("scaler.pkl")
+    with open("threshold.txt", "r") as f:
+        threshold = float(f.read().strip())
+    return model, scaler, threshold
+
+model, scaler, threshold = load_artifacts()
+
+# Upload CSV
+uploaded_file = st.file_uploader("📄 Upload audio_features_full.csv", type=["csv"])
+
+if uploaded_file:
     try:
-        model = joblib.load("best_model.pkl")
-        scaler = joblib.load("scaler.pkl")
-        with open("threshold.txt", "r") as f:
-            threshold = float(f.read().strip())
-        return model, scaler, threshold
-    except Exception as e:
-        st.error(f"❌ Failed to load model assets: {e}")
-        return None, None, None
+        df = pd.read_csv(uploaded_file)
 
-model, scaler, threshold = load_assets()
+        st.subheader("📊 Extracted Features")
+        st.dataframe(df)
 
-# Upload files
-csv_file = st.file_uploader("📄 Upload `audio_features.csv`", type="csv")
-txt_file = st.file_uploader("📝 Upload `voice_diagnostic.txt` (optional)", type="txt")
+        # Check expected number of features
+        if df.shape[1] != scaler.n_features_in_:
+            raise ValueError(f"Expected {scaler.n_features_in_} features, got {df.shape[1]}.")
 
-# Process CSV
-if csv_file and model and scaler:
-    try:
-        df = pd.read_csv(csv_file)
-        st.subheader("📊 Extracted Voice Features")
-        st.dataframe(df.T.rename(columns={0: "Value"}))
-
-        # Radar chart (only non-null numeric columns)
-        df_clean = df.dropna(axis=1)
-        if not df_clean.empty:
-            labels = df_clean.columns.tolist()
-            values = df_clean.loc[0].tolist()
-            values += values[:1]
-            fig = go.Figure()
-            fig.add_trace(go.Scatterpolar(
-                r=values,
-                theta=labels + [labels[0]],
-                fill='toself'
-            ))
-            fig.update_layout(
-                polar=dict(radialaxis=dict(visible=True)),
-                title="Radar Chart of Voice Biomarkers",
-                showlegend=False
-            )
-            st.plotly_chart(fig)
+        if df.isnull().values.any():
+            st.error("⚠️ CSV contains missing values. Please verify in Colab.")
         else:
-            st.warning("Not enough valid features for radar chart.")
+            # Scale input
+            scaled = scaler.transform(df)
 
-        # Prediction
-        features_scaled = scaler.transform(df.fillna(0))  # Fill missing with 0 for simplicity
-        prob = model.predict_proba(features_scaled)[0][1]
-
-        st.subheader("🧪 Parkinson’s Prediction")
-        if prob > threshold:
-            st.error(f"🔴 Prediction: High likelihood of Parkinson's (probability = {prob:.2f})")
-        else:
-            st.success(f"🟢 Prediction: No Parkinson's detected (probability = {prob:.2f})")
-
-    except Exception as e:
-        st.error(f"❌ Failed to process audio_features.csv: {e}")
-
-# Optional Feedback
-if txt_file:
-    try:
-        txt_content = txt_file.read().decode("utf-8")
-        st.subheader("📝 Feedback from Colab")
-        st.text(txt_content)
-    except Exception as e:
-        st.error(f"❌ Failed to read diagnostic file: {e}")
+            # Predict
+            proba = model.predict_proba(scaled)[0][1]  # Probability of class 1 (Parkinson'_
