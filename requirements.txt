@@ -7,3 +7,4 @@ plotly
 joblib
 openpyxl
 praat-parselmouth
+python_version < 3.11
