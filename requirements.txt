@@ -6,4 +6,4 @@ librosa
 plotly
 joblib
 openpyxl
-parselmouth
+praat-parselmouth
