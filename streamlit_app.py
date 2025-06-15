@@ -12,17 +12,18 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Parkinson's Detection", layout="centered")
 st.title("🧠 Parkinson's Detection (Voice Biomarkers)")
-st.write("Upload a `.wav` file. The app extracts biomedical voice features (jitter, shimmer, HNR, etc.) and predicts Parkinson's disease using a pre-trained model.")
+st.write("Upload a `.wav` file. The app extracts voice features and predicts Parkinson's disease.")
 
 @st.cache_resource
-def load_models():
-    return {
-        'best': joblib.load('best_model.pkl'),
-        'scaler': joblib.load('scaler.pkl')
-    }
+def load_assets():
+    model = joblib.load("best_model.pkl")
+    scaler = joblib.load("scaler.pkl")
+    with open("threshold.txt", "r") as f:
+        threshold = float(f.read().strip())
+    return model, scaler, threshold
 
-models = load_models()
-expected_feature_count = models['scaler'].n_features_in_
+model, scaler, threshold = load_assets()
+expected_feature_count = scaler.n_features_in_
 
 expected_features = [
     'Jitter (%)',
@@ -35,7 +36,7 @@ expected_features = [
     'HNR'
 ]
 
-def extract_biomedical_features(audio_path):
+def extract_features(audio_path):
     snd = parselmouth.Sound(audio_path)
     point_process = call(snd, "To PointProcess (periodic, cc)", 75, 500)
     harmonicity = call(snd, "To Harmonicity (cc)", 0.01, 75, 0.1, 1.0)
@@ -75,7 +76,7 @@ if file is not None:
         fig.colorbar(ax.images[0], ax=ax)
         st.pyplot(fig)
 
-        features = extract_biomedical_features(audio_path)
+        features = extract_features(audio_path)
         df = pd.DataFrame([features])
         st.subheader("📊 Extracted Features")
         st.write(df)
@@ -86,51 +87,29 @@ if file is not None:
             raise ValueError("Missing values in extracted features.")
 
         input_data = df.values
-        scaled = models['scaler'].transform(input_data)
+        scaled = scaler.transform(input_data)
 
-        if scaled.shape[0] == 0:
-            raise ValueError("Empty input after scaling.")
-
-        try:
-            preds = models['best'].predict(scaled)
-        except Exception as e:
-            raise RuntimeError(f"Prediction failed: {e}")
-
-        try:
-            probas = models['best'].predict_proba(scaled)
-            if probas.shape[1] == 2:
-                probs = probas[:, 1]
-                avg_conf = float(np.mean(probs))
-            else:
-                st.warning("⚠️ Model only predicts one class. Confidence is not meaningful.")
-                avg_conf = 1.0
-        except Exception as e:
-            st.warning(f"⚠️ Confidence unavailable: {e}")
-            avg_conf = 1.0
-
-        result = int(np.round(np.mean(preds)))
+        probas = model.predict_proba(scaled)
+        probability = probas[:, 1][0]
+        prediction = 1 if probability > threshold else 0
 
         st.subheader("🧪 Prediction Result")
-        st.write(f"**Prediction**: {'🟥 Positive' if result == 1 else '🟩 Negative'}")
-        if avg_conf <= 1.0:
-            st.write(f"**Confidence**: {avg_conf * 100:.2f}%")
-        else:
-            st.write("**Confidence**: N/A (only one class or unsupported)")
+        st.write(f"**Prediction**: {'🟥 Positive (Parkinson\'s)' if prediction == 1 else '🟩 Negative (Healthy)'}")
+        st.write(f"**Confidence**: {probability * 100:.2f}% (threshold = {threshold})")
 
-        if avg_conf <= 1.0:
-            fig_radar = go.Figure()
-            fig_radar.add_trace(go.Scatterpolar(
-                r=[avg_conf * 100],
-                theta=['Confidence'],
-                fill='toself',
-                name='Model Confidence'
-            ))
-            fig_radar.update_layout(
-                polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                showlegend=False,
-                title="Confidence Radar"
-            )
-            st.plotly_chart(fig_radar)
+        fig_radar = go.Figure()
+        fig_radar.add_trace(go.Scatterpolar(
+            r=[probability * 100],
+            theta=['Confidence'],
+            fill='toself',
+            name='Model Confidence'
+        ))
+        fig_radar.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+            showlegend=False,
+            title="Confidence Radar"
+        )
+        st.plotly_chart(fig_radar)
 
     except Exception as e:
         st.error(f"❌ Error processing file: {e}")
