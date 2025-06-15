@@ -1,10 +1,11 @@
 streamlit
 numpy
 pandas
+scikit-learn
+joblib
 matplotlib
+seaborn
 librosa
 plotly
-joblib
-openpyxl
-praat-parselmouth
-python_version < 3.11
+parselmouth
+tensorflow
