@@ -6,12 +6,13 @@ import plotly.graph_objects as go
 import librosa
 import librosa.display
 import matplotlib.pyplot as plt
-import os
+import parselmouth
+from parselmouth.praat import call
 import tempfile
 
-st.set_page_config(page_title="Parkinson's Detection from MFCC", layout="centered")
-st.title("🧠 Parkinson's Detection from MFCC Features")
-st.write("Upload a .wav file or a .csv/.xlsx file with MFCCs to predict Parkinson's.")
+st.set_page_config(page_title="Parkinson's Detection", layout="centered")
+st.title("🧠 Parkinson's Detection from Voice Features")
+st.write("Upload a .wav file or .csv/.xlsx file to predict Parkinson's disease using biomedical voice features.")
 
 @st.cache_resource
 def load_models():
@@ -22,60 +23,83 @@ def load_models():
 
 models = load_models()
 
-# Define expected number of MFCC features (you can change this if needed)
-NUM_FEATURES = 20
+def extract_biomedical_features(audio_path):
+    snd = parselmouth.Sound(audio_path)
+    point_process = call(snd, "To PointProcess (periodic, cc)", 75, 500)
+    harmonicity = call(snd, "To Harmonicity (cc)", 0.01, 75, 0.1, 1.0)
 
-file = st.file_uploader("Upload MFCC file or Audio (.csv, .xlsx, .wav)", type=["csv", "xlsx", "wav"])
+    features = {
+        'Jitter (%)': call(point_process, "Get jitter (local)", 0, 0, 0.0001, 0.02, 1.3),
+        'Jitter (Abs)': call(point_process, "Get jitter (absolute)", 0, 0, 0.0001, 0.02, 1.3),
+        'Shimmer (dB)': call([snd, point_process], "Get shimmer (dB)", 0, 0, 0.0001, 0.02, 1.3, 1.6),
+        'Shimmer (APQ3)': call([snd, point_process], "Get shimmer (apq3)", 0, 0, 0.0001, 0.02, 1.3, 1.6),
+        'Shimmer (APQ5)': call([snd, point_process], "Get shimmer (apq5)", 0, 0, 0.0001, 0.02, 1.3, 1.6),
+        'Shimmer (APQ11)': call([snd, point_process], "Get shimmer (apq11)", 0, 0, 0.0001, 0.02, 1.3, 1.6),
+        'Shimmer (DDA)': call([snd, point_process], "Get shimmer (dda)", 0, 0, 0.0001, 0.02, 1.3, 1.6),
+        'HNR': call(harmonicity, "Get mean", 0, 0),
+    }
+    return features
+
+file = st.file_uploader("Upload a voice file or feature table (.wav, .csv, .xlsx)", type=["csv", "xlsx", "wav"])
 
 if file is not None:
     try:
         if file.name.endswith(".csv"):
             df = pd.read_csv(file)
-            mfcc_data = df.iloc[:, :NUM_FEATURES].values
+            input_data = df.values
 
         elif file.name.endswith(".xlsx"):
             df = pd.read_excel(file)
-            mfcc_data = df.iloc[:, :NUM_FEATURES].values
+            input_data = df.values
 
         elif file.name.endswith(".wav"):
-            # Save temporarily to disk
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-                tmp_file.write(file.read())
-                audio_path = tmp_file.name
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                tmp.write(file.read())
+                audio_path = tmp.name
 
             st.audio(audio_path, format='audio/wav')
 
-            # Load and extract MFCCs
+            # Show MFCC (optional visualization)
             y, sr = librosa.load(audio_path, sr=None)
-            mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=NUM_FEATURES)
-            mfcc_data = mfccs.T
-
-            # Display MFCC spectrogram
+            mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
             fig, ax = plt.subplots()
-            img = librosa.display.specshow(mfccs, x_axis='time', ax=ax)
-            ax.set(title='MFCC')
-            fig.colorbar(img, ax=ax)
+            librosa.display.specshow(mfccs, x_axis='time', ax=ax)
+            ax.set(title='MFCC Visualization')
+            fig.colorbar(ax.images[0], ax=ax)
             st.pyplot(fig)
 
-        else:
-            raise ValueError("Unsupported file format")
+            # Extract biomedical voice features
+            features = extract_biomedical_features(audio_path)
+            df = pd.DataFrame([features])
+            st.subheader("📊 Extracted Features")
+            st.write(df)
 
-        scaled = models['scaler'].transform(mfcc_data)
+            input_data = df.values
+
+        else:
+            raise ValueError("Unsupported file format.")
+
+        # Scale and predict
+        scaled = models['scaler'].transform(input_data)
         probs = models['best'].predict_proba(scaled)[:, 1]
         preds = models['best'].predict(scaled)
         majority_vote = int(np.round(np.mean(preds)))
         avg_conf = np.mean(probs)
 
-        st.subheader("🧪 Result")
-        result_text = "Positive" if majority_vote == 1 else "Negative"
-        st.write(f"**Prediction**: {result_text}")
+        st.subheader("🧪 Prediction Result")
+        result = "Positive" if majority_vote == 1 else "Negative"
+        st.write(f"**Prediction**: {result}")
         st.write(f"**Confidence**: {avg_conf*100:.2f}%")
 
-        # Radar plot
+        # Radar Chart
         fig_radar = go.Figure()
-        fig_radar.add_trace(go.Scatterpolar(r=[avg_conf * 100], theta=['Confidence'], fill='toself', name='Best Model'))
-        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=True, title="Confidence Radar Chart")
+        fig_radar.add_trace(go.Scatterpolar(r=[avg_conf * 100], theta=['Confidence'], fill='toself', name='Model'))
+        fig_radar.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+            showlegend=True,
+            title="Confidence Radar Chart"
+        )
         st.plotly_chart(fig_radar)
 
     except Exception as e:
-        st.error(f"Error processing file: {e}")
+        st.error(f"❌ Error processing file: {e}")
