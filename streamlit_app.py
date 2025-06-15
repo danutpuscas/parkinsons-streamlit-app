@@ -36,29 +36,32 @@ if uploaded_file:
         if df.isnull().values.any():
             st.error("⚠️ CSV contains missing values. Please verify in Colab.")
         else:
-    # Scale input
-    scaled = scaler.transform(df)
+            # Scale input
+            scaled = scaler.transform(df)
 
-    # Predict
-    proba = model.predict_proba(scaled)[0][1]  # Probability of class 1 (Parkinson's)
-    prediction = int(proba > threshold)
+            # Predict
+            proba = model.predict_proba(scaled)[0][1]  # Probability of class 1 (Parkinson's)
+            prediction = int(proba > threshold)
 
-    st.subheader("🧪 Prediction Result")
-    st.markdown(f"**Prediction:** {'🟥 Positive' if prediction == 1 else '🟩 Negative'}")
-    st.markdown(f"**Confidence:** {proba * 100:.2f}%")
-    st.markdown(f"**Threshold Used:** {threshold:.2f}")
+            st.subheader("🧪 Prediction Result")
+            st.markdown(f"**Prediction:** {'🟥 Positive' if prediction == 1 else '🟩 Negative'}")
+            st.markdown(f"**Confidence:** {proba * 100:.2f}%")
+            st.markdown(f"**Threshold Used:** {threshold:.2f}")
 
-    # Radar chart
-    fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(
-        r=[proba * 100],
-        theta=['Model Confidence'],
-        fill='toself',
-        name='Confidence'
-    ))
-    fig.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-        showlegend=False,
-        title="Confidence Radar"
-    )
-    st.plotly_chart(fig)
+            # Radar chart
+            fig = go.Figure()
+            fig.add_trace(go.Scatterpolar(
+                r=[proba * 100],
+                theta=['Model Confidence'],
+                fill='toself',
+                name='Confidence'
+            ))
+            fig.update_layout(
+                polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+                showlegend=False,
+                title="Confidence Radar"
+            )
+            st.plotly_chart(fig)
+
+    except Exception as e:
+        st.error(f"❌ Failed to process audio_features.csv: {e}")
