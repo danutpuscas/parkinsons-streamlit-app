@@ -4,15 +4,12 @@ import numpy as np
 import joblib
 import plotly.graph_objects as go
 
-# Page setup
-st.set_page_config(page_title="Parkinson's Detection (CSV)", layout="centered")
-st.title("🧠 Parkinson's Detection from Extracted Audio Features")
-st.markdown("""
-Upload a `.csv` file exported from your Colab extractor containing 20 audio features.
-The app will scale it, handle any missing values, and use your trained model to predict Parkinson's presence.
-""")
+# UI Configuration
+st.set_page_config(page_title="Parkinson's Detector (13 Features)", layout="centered")
+st.title("🧠 Parkinson's Detection from Audio Features")
+st.write("Upload a `.csv` file extracted from a `.wav` recording (13 features only).")
 
-# Load model artifacts
+# Load trained model, scaler, and threshold
 @st.cache_resource
 def load_artifacts():
     model = joblib.load("best_model.pkl")
@@ -23,35 +20,47 @@ def load_artifacts():
 
 model, scaler, threshold = load_artifacts()
 
+# Expected feature order
+expected_columns = [
+    'Jitter(%)', 'Jitter:RAP', 'Jitter:PPQ5', 'Jitter:DDP',
+    'Shimmer', 'Shimmer:APQ3', 'Shimmer:APQ5', 'Shimmer:APQ11', 'Shimmer:DDA',
+    'HNR', 'RPDE', 'DFA', 'PPE'
+]
+
 # Upload CSV
-uploaded_file = st.file_uploader("📄 Upload extracted audio_features CSV", type=["csv"])
+uploaded_file = st.file_uploader("📄 Upload extracted_features.csv", type=["csv"])
 
 if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file)
-        st.subheader("🔍 Raw Features")
+        st.subheader("📊 Extracted Features")
         st.dataframe(df)
 
-        # Handle missing values
-        if df.isnull().values.any():
-            st.warning("⚠️ Missing values found in the file. Imputing with column means...")
-            df.fillna(df.mean(), inplace=True)
-
-        # Check for proper shape
-        if df.shape[1] != scaler.n_features_in_:
-            st.error(f"❌ Expected {scaler.n_features_in_} features, got {df.shape[1]}. Please verify the CSV.")
+        # Check number of features
+        if df.shape[1] != len(expected_columns):
+            st.error(f"❌ Expected {len(expected_columns)} features, got {df.shape[1]}. Please verify the CSV.")
         else:
-            # Scale and predict
+            # Reorder just in case
+            df = df[expected_columns]
+
+            # Handle missing values
+            if df.isnull().values.any():
+                st.warning("⚠️ Missing values found in the file. Imputing with column means...")
+                df.fillna(df.mean(), inplace=True)
+
+            # Scale features
             scaled = scaler.transform(df)
-            proba = model.predict_proba(scaled)[0][1]
+
+            # Predict
+            proba = model.predict_proba(scaled)[0][1]  # Class 1 = Parkinson's
             prediction = int(proba > threshold)
 
             st.subheader("🧪 Prediction Result")
-            st.markdown(f"**Prediction:** {'🟥 Parkinson\'s Detected' if prediction == 1 else '🟩 Healthy (No Parkinson\'s)'}")
-            st.markdown(f"**Confidence:** `{proba * 100:.2f}%`")
-            st.markdown(f"**Threshold Used:** `{threshold:.2f}`")
+            st.markdown(f"**Prediction:** {'🟥 Parkinson Detected' if prediction == 1 else '🟩 Healthy'}")
+            st.markdown(f"**Confidence:** {proba * 100:.2f}%")
+            st.markdown(f"**Threshold Used:** {threshold:.2f}")
 
-            # Radar chart (visual confidence)
+            # Radar plot
             fig = go.Figure()
             fig.add_trace(go.Scatterpolar(
                 r=[proba * 100],
@@ -62,9 +71,9 @@ if uploaded_file:
             fig.update_layout(
                 polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
                 showlegend=False,
-                title="🧭 Confidence Radar"
+                title="Confidence Radar"
             )
             st.plotly_chart(fig)
 
     except Exception as e:
-        st.error(f"❌ Failed to process CSV: {e}")
+        st.error(f"❌ Failed to process the file: {e}")
