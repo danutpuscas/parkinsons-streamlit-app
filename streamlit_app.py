@@ -33,47 +33,47 @@ uploaded_file = st.file_uploader("📄 Upload extracted_features.csv", type=["cs
 if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file)
-        st.subheader("📊 Extracted Features")
+        st.subheader("📊 Extracted Features (Preview)")
         st.dataframe(df)
 
-        # Check number of features
-        if df.shape[1] != len(expected_columns):
-            st.error(f"❌ Expected {len(expected_columns)} features, got {df.shape[1]}. Please verify the CSV.")
-        else:
-            # Reorder just in case
+        # Subset to only the expected columns
+        try:
             df = df[expected_columns]
+        except KeyError as e:
+            st.error(f"❌ Uploaded CSV is missing one or more required features: {e}")
+            st.stop()
 
-            # Handle missing values
-            if df.isnull().values.any():
-                st.warning("⚠️ Missing values found in the file. Imputing with column means...")
-                df.fillna(df.mean(), inplace=True)
+        # Handle missing values
+        if df.isnull().values.any():
+            st.warning("⚠️ Missing values found in the file. Imputing with column means...")
+            df.fillna(df.mean(), inplace=True)
 
-            # Scale features
-            scaled = scaler.transform(df)
+        # Scale features
+        scaled = scaler.transform(df)
 
-            # Predict
-            proba = model.predict_proba(scaled)[0][1]  # Class 1 = Parkinson's
-            prediction = int(proba > threshold)
+        # Predict
+        proba = model.predict_proba(scaled)[0][1]  # Class 1 = Parkinson's
+        prediction = int(proba > threshold)
 
-            st.subheader("🧪 Prediction Result")
-            st.markdown(f"**Prediction:** {'🟥 Parkinson Detected' if prediction == 1 else '🟩 Healthy'}")
-            st.markdown(f"**Confidence:** {proba * 100:.2f}%")
-            st.markdown(f"**Threshold Used:** {threshold:.2f}")
+        st.subheader("🧪 Prediction Result")
+        st.markdown(f"**Prediction:** {'🟥 Parkinson Detected' if prediction == 1 else '🟩 Healthy'}")
+        st.markdown(f"**Confidence:** {proba * 100:.2f}%")
+        st.markdown(f"**Threshold Used:** {threshold:.2f}")
 
-            # Radar plot
-            fig = go.Figure()
-            fig.add_trace(go.Scatterpolar(
-                r=[proba * 100],
-                theta=['Model Confidence'],
-                fill='toself',
-                name='Confidence'
-            ))
-            fig.update_layout(
-                polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                showlegend=False,
-                title="Confidence Radar"
-            )
-            st.plotly_chart(fig)
+        # Radar plot
+        fig = go.Figure()
+        fig.add_trace(go.Scatterpolar(
+            r=[proba * 100],
+            theta=['Model Confidence'],
+            fill='toself',
+            name='Confidence'
+        ))
+        fig.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+            showlegend=False,
+            title="Confidence Radar"
+        )
+        st.plotly_chart(fig)
 
     except Exception as e:
         st.error(f"❌ Failed to process the file: {e}")
