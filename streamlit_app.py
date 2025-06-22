@@ -5,9 +5,9 @@ import joblib
 import plotly.graph_objects as go
 
 # UI Configuration
-st.set_page_config(page_title="Parkinson's Detector (13 Features)", layout="centered")
+st.set_page_config(page_title="Parkinson's Detector", layout="centered")
 st.title("🧠 Parkinson's Detection from Audio Features")
-st.write("Upload a `.csv` file extracted from a `.wav` recording (13 features only).")
+st.write("Upload a `.csv` file extracted from a `.wav` recording.")
 
 # Load trained model, scaler, and threshold
 @st.cache_resource
