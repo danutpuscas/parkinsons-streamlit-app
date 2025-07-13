@@ -57,9 +57,6 @@ if uploaded_file:
 
         st.subheader("🧪 Prediction Result")
         st.markdown(f"**Prediction:** {'🟥 Parkinson Detected' if prediction == 1 else '🟩 Healthy'}")
-        st.markdown(f"**Model Raw Probability (Parkinson class):** `{proba:.5f}`")
-        st.markdown(f"**Confidence (%):** `{proba * 100:.2f}%`")
-        st.markdown(f"**Threshold Used:** `{threshold:.2f}`")
 
         # Radar plot
         fig = go.Figure()
